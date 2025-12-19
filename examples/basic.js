@@ -12,7 +12,6 @@
 //    • Try changing line 65 to: container.get(config).log("hi") → type error!
 //
 // =============================================================================
-// @ts-check
 
 import { createContainer } from "no-decoration"
 

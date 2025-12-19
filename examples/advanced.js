@@ -8,7 +8,6 @@
 //   - Disposal/cleanup
 //   - Circular dependency detection
 // =============================================================================
-// @ts-check
 
 import { createContainer } from "no-decoration"
 

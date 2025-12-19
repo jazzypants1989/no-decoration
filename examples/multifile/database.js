@@ -3,7 +3,6 @@
 // =============================================================================
 // Depends on: config, logger
 // Demonstrates: async factory, disposal
-// @ts-check
 
 /** @import { Logger } from './logger.js' */
 

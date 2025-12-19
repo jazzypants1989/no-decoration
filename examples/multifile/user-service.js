@@ -3,7 +3,6 @@
 // =============================================================================
 // Depends on: database, logger
 // Demonstrates: async factory with async dependencies
-// @ts-check
 
 /** @import { Database } from './database.js' */
 /** @import { Logger } from './logger.js' */

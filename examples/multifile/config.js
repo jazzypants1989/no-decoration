@@ -2,7 +2,6 @@
 // Config Module
 // =============================================================================
 // This factory has no dependencies - it's a "root" of the dependency graph.
-// @ts-check
 
 /** @import { Factory } from 'no-decoration' */
 

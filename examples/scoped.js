@@ -7,7 +7,6 @@
 // Common use case: HTTP servers where each request needs its own context
 // but should share app-wide singletons (database, logger, etc.)
 // =============================================================================
-// @ts-check
 
 import { createContainer, childContainer } from "no-decoration"
 

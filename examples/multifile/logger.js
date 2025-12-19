@@ -2,7 +2,6 @@
 // Logger Module
 // =============================================================================
 // Depends on: config
-// @ts-check
 
 /** @import { Factory } from 'no-decoration' */
 /** @import { Config } from './config.js' */
