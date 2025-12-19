@@ -34,8 +34,8 @@ npm install no-decoration
 
 ## Quick Start
 
-```js
-import { createContainer, inject } from "no-decoration"
+```ts
+import { createContainer, inject, type Factory } from "no-decoration"
 
 // Plain classes
 class Config {
@@ -43,24 +43,26 @@ class Config {
 }
 
 class Logger {
-  constructor(config) {
-    this.config = config
-  }
-  log(msg) {
+  constructor(private config: Config) {}
+  log(msg: string) {
     console.log(`[${this.config.env}] ${msg}`)
   }
 }
 
 // Factories: (container) => instance
-const config = () => new Config()
-const logger = (c) => new Logger(c.get(config))
+// Type the factory for full autocomplete on container.get()
+const config: Factory<Config> = () => new Config()
+const logger: Factory<Logger> = (c) => new Logger(c.get(config))
 
-// Or shorter: const logger = inject(Logger, config)
+// Or use inject() - types are inferred automatically
+const logger2 = inject(Logger, config)
 
 // Usage
 const container = createContainer()
-container.get(logger).log("Hello!") // [development] Hello!
+container.get(logger).log("Hello!") // Full autocomplete here!
 ```
+
+> **Note:** For best IDE experience, type your factories with `Factory<T>` or use `inject()`. Plain JS works too, but you won't get autocomplete on `container.get()` results without types.
 
 ## Structure
 
@@ -103,9 +105,9 @@ That's a reasonable concern. So I wrote a tiny library to see how "verbose" it a
 
 Two ways to wire dependencies:
 
-```js
+```ts
 // Explicit factory - full control, conditional logic, async
-const logger = (c) => new Logger(c.get(config))
+const logger: Factory<Logger> = (c) => new Logger(c.get(config))
 
 // inject() helper - just list dependencies in constructor order
 const logger = inject(Logger, config)
@@ -127,18 +129,21 @@ Both are one line, and neither require decorators, reflection, or build steps.
 
 Services often depend on many things. Just call `c.get()` for each:
 
-```js
+```ts
 class UserService {
-  constructor(db, logger, cache, config) {
-    // ...
-  }
+  constructor(
+    private db: Database,
+    private logger: Logger,
+    private cache: Cache,
+    private config: Config
+  ) {}
 }
 
 // Explicit factory - full control
-const userService = (c) =>
+const userService: Factory<UserService> = (c) =>
   new UserService(c.get(db), c.get(logger), c.get(cache), c.get(config))
 
-// Or use inject() helper - less typing
+// Or use inject() helper - types inferred, less typing
 const userService = inject(UserService, db, logger, cache, config)
 ```
 
@@ -146,13 +151,13 @@ const userService = inject(UserService, db, logger, cache, config)
 
 For database connections, HTTP clients, anything async:
 
-```js
-const database = (c) => {
+```ts
+// Async factories return Factory<Promise<T>>
+const database: Factory<Promise<Database>> = async (c) => {
   const cfg = c.get(config)
-  return Database.connect(cfg.dbUrl).then((db) => {
-    c.onDispose(() => db.close()) // Cleanup on dispose
-    return db
-  })
+  const db = await Database.connect(cfg.dbUrl)
+  c.onDispose(() => db.close()) // Cleanup on dispose
+  return db
 }
 
 // Usage - just await it
@@ -163,8 +168,8 @@ const db = await container.get(database)
 
 Register cleanup functions, called in reverse order (LIFO):
 
-```js
-const server = (c) => {
+```ts
+const server: Factory<Server> = (c) => {
   const srv = new Server(c.get(config))
   c.onDispose(() => srv.stop())
   return srv
@@ -178,16 +183,21 @@ await container.dispose()
 
 Child containers inherit parent singletons but have their own cache:
 
-```js
-import { createContainer, childContainer } from "no-decoration"
+```ts
+import {
+  createContainer,
+  childContainer,
+  inject,
+  type Factory,
+} from "no-decoration"
 
 const app = createContainer()
 
-function handleRequest(userId) {
+function handleRequest(userId: string) {
   const request = childContainer(app) // Inherits app singletons
 
   // Request-specific factory
-  const ctx = () => new RequestContext(userId)
+  const ctx: Factory<RequestContext> = () => new RequestContext(userId)
   const handler = inject(Handler, logger, ctx) // logger from parent
 
   return request.get(handler).handle()
@@ -249,22 +259,21 @@ The "explicit wiring" that decorator DI avoids is literally `inject(Class, dep1,
 
 ## TypeScript
 
-Full type inference with zero build step. The library ships with handwritten `.d.ts` files.
+Full type inference ships with the library via handwritten `.d.ts` files. No build step required.
+
+This is the ["handwritten-dts" pattern](https://github.com/jazzypants1989/no-build-typescript) - full type safety with zero build step.
+
+**Two ways to get autocomplete:**
 
 ```ts
-import { createContainer, inject, type Factory } from "no-decoration"
+// 1. Explicit Factory<T> annotation
+const logger: Factory<Logger> = (c) => new Logger(c.get(config))
 
-class Logger {
-  log(msg: string) {
-    console.log(msg)
-  }
-}
-
-const logger: Factory<Logger> = () => new Logger()
-
-const container = createContainer()
-container.get(logger).log("typed!") // Full autocomplete
+// 2. Use inject() - types inferred from class constructor
+const logger = inject(Logger, config)
 ```
+
+Both give you full autocomplete on `container.get(logger)`.
 
 **In your IDE:**
 
@@ -272,6 +281,8 @@ container.get(logger).log("typed!") // Full autocomplete
 - Cmd/Ctrl+Click to jump to definitions
 - Autocomplete for `container.get()` results
 - Type errors when passing wrong dependencies
+
+**Plain JavaScript:** Works fine, but without `Factory<T>` annotations or `inject()`, you won't get autocomplete on resolved instances. If you're using JS with JSDoc, you can use `/** @type {import('no-decoration').Factory<MyClass>} */` to get the same effect.
 
 ## API Reference
 
