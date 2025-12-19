@@ -1,0 +1,26 @@
+{
+  "name": "no-decoration",
+  "version": "1.0.0",
+  "description": "Tiny DI container. No decorators. No reflection. No build step.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/container.d.ts",
+      "import": "./lib/container.js"
+    }
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "dependency-injection",
+    "di",
+    "container",
+    "no-decorators"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.0.3"
+  }
+}
