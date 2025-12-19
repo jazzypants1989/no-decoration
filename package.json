@@ -1,6 +1,6 @@
 {
   "name": "no-decoration",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Tiny DI container. No decorators. No reflection. No build step.",
   "type": "module",
   "exports": {
