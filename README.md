@@ -1,98 +1,395 @@
-# Dependency Injection Without Decorators
+# no-decoration
 
-A tiny DI container proving you don't need decorators, reflection, or `emitDecoratorMetadata` for dependency injection in JavaScript/TypeScript.
+## Dependency Injection Without Decorators
 
-## The Point
+A tiny DI container (~100 lines) proving you don't need decorators, reflection, or `emitDecoratorMetadata` for dependency injection in JavaScript/TypeScript.
 
-> "Without some form of metadata or generation, you generally have to declare the dependency graph explicitly, which adds wiring and can make usage more verbose."
+**[Try it in StackBlitz](https://stackblitz.com/github/jazzypants1989/no-decoration?file=examples%2Ftypescript.ts)**
 
-The "wiring" is one line per service:
+## Table of Contents
 
-```js
-const logger = (c) => new Logger(c.get(config))
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Structure](#structure)
+- [Run the Examples](#run-the-examples)
+- [Why This Exists](#why-this-exists)
+- [The Wiring](#the-wiring)
+- [Features](#features)
+  - [Multiple Dependencies](#multiple-dependencies)
+  - [Async Factories](#async-factories)
+  - [Disposal / Cleanup](#disposal--cleanup)
+  - [Child Containers](#child-containers-per-request-scoping)
+  - [Circular Dependency Detection](#circular-dependency-detection)
+- [Comparison](#comparison)
+- [Trade-offs](#trade-offs)
+- [TypeScript](#typescript)
+- [API Reference](#api-reference)
+- [License](#license)
+
+## Installation
+
+```bash
+npm install no-decoration
 ```
 
-That's it. No decorators. No reflection. No experimental flags. No build step.
+## Quick Start
+
+```js
+import { createContainer, inject } from "no-decoration"
+
+// Plain classes
+class Config {
+  env = "development"
+}
+
+class Logger {
+  constructor(config) {
+    this.config = config
+  }
+  log(msg) {
+    console.log(`[${this.config.env}] ${msg}`)
+  }
+}
+
+// Factories: (container) => instance
+const config = () => new Config()
+const logger = (c) => new Logger(c.get(config))
+
+// Or shorter: const logger = inject(Logger, config)
+
+// Usage
+const container = createContainer()
+container.get(logger).log("Hello!") // [development] Hello!
+```
 
 ## Structure
 
 ```
 lib/
-  container.js     # The entire DI system (~40 lines of code)
+  container.js     # The entire DI system (~100 lines)
+  container.d.ts   # TypeScript definitions
 
 examples/
   basic.js         # Simple singleton example
   scoped.js        # Per-request scoping (HTTP server pattern)
-  typescript.ts    # TypeScript version with full type inference
+  advanced.js      # Async, disposal, circular detection
+  typescript.ts    # Comprehensive TypeScript example
 ```
 
 ## Run the Examples
 
+If you want to see this library in action, just [check it out on StackBlitz](https://stackblitz.com/github/jazzypants1989/no-decoration?file=examples%2Ftypescript.ts) or clone the repo and run:
+
 ```bash
-# JavaScript
-node examples/basic.js
-node examples/scoped.js
+# Run all examples
+npm start
 
-# TypeScript
-npx tsx examples/typescript.ts
+# Or run individually
+npm run example:basic
+npm run example:scoped
+npm run example:advanced
+npm run example:typescript
 ```
 
-## Type Safety Without a Build Step
+## Why This Exists
 
-The library ships with a handwritten `.d.ts` file for TypeScript consumers. No compilation needed.
+I got nerd-sniped by a Reddit comment. Someone built a DI library using `experimentalDecorators`, and when I asked why not use a decorator-free approach, they responded:
 
-**Why a `.d.ts` file?** While the `.js` source uses JSDoc for type checking during development, npm consumers typically don't have `allowJs: true` in their tsconfig. The `.d.ts` ensures everyone gets autocomplete and type checking out of the box.
+> "Without some form of metadata or generation, you generally have to declare the dependency graph explicitly, which adds wiring and can make usage more verbose."
 
-```
-lib/
-├── container.js      # Implementation (runs in Node/browser)
-└── container.d.ts    # Type definitions (for IDE/TypeScript)
-```
+That's a reasonable concern. So I wrote a tiny library to see how "verbose" it actually is, and it turns out you can whittle it down to around one line per service.
 
-This is the ["handwritten-dts" pattern](https://github.com/jazzypants1989/no-build-typescript) - full type safety with zero build step.
+## The Wiring
 
-**In your IDE:**
-
-- Hover over any factory to see its inferred type
-- Cmd/Ctrl+Click to jump to definitions
-- Get autocomplete for `container.get()` results
-- See type errors inline when you pass wrong dependencies
-
-Try it: open `examples/basic.js` and hover over `service` on line 73.
-
-## How It Works
-
-1. A **factory** is a function: `(container) => instance`
-2. The **container** caches factory results (singleton by default)
-3. Factories call `c.get(otherFactory)` to declare dependencies
+Two ways to wire dependencies:
 
 ```js
-// Define services (plain classes)
-class Logger {
-  constructor(config) {
-    this.config = config
+// Explicit factory - full control, conditional logic, async
+const logger = (c) => new Logger(c.get(config))
+
+// inject() helper - just list dependencies in constructor order
+const logger = inject(Logger, config)
+```
+
+Both are one line, and neither require decorators, reflection, or build steps.
+
+**Use explicit factories when you need:**
+
+- Conditional logic (`env === 'test' ? mockLogger : realLogger`)
+- Async initialization (`await Database.connect(...)`)
+- Custom construction beyond `new Class(...deps)`
+
+**Use `inject()` when:** you just want `new Class(dep1, dep2, dep3)`
+
+## Features
+
+### Multiple Dependencies
+
+Services often depend on many things. Just call `c.get()` for each:
+
+```js
+class UserService {
+  constructor(db, logger, cache, config) {
+    // ...
   }
 }
 
-// Define factories (one line each)
-const config = () => new Config()
-const logger = (c) => new Logger(c.get(config))
+// Explicit factory - full control
+const userService = (c) =>
+  new UserService(c.get(db), c.get(logger), c.get(cache), c.get(config))
 
-// Use
-const container = createContainer()
-const log = container.get(logger) // Dependencies resolved automatically
+// Or use inject() helper - less typing
+const userService = inject(UserService, db, logger, cache, config)
+```
+
+### Async Factories
+
+For database connections, HTTP clients, anything async:
+
+```js
+const database = (c) => {
+  const cfg = c.get(config)
+  return Database.connect(cfg.dbUrl).then((db) => {
+    c.onDispose(() => db.close()) // Cleanup on dispose
+    return db
+  })
+}
+
+// Usage - just await it
+const db = await container.get(database)
+```
+
+### Disposal / Cleanup
+
+Register cleanup functions, called in reverse order (LIFO):
+
+```js
+const server = (c) => {
+  const srv = new Server(c.get(config))
+  c.onDispose(() => srv.stop())
+  return srv
+}
+
+// Later: clean up everything
+await container.dispose()
+```
+
+### Child Containers (Per-Request Scoping)
+
+Child containers inherit parent singletons but have their own cache:
+
+```js
+import { createContainer, childContainer } from "no-decoration"
+
+const app = createContainer()
+
+function handleRequest(userId) {
+  const request = childContainer(app) // Inherits app singletons
+
+  // Request-specific factory
+  const ctx = () => new RequestContext(userId)
+  const handler = inject(Handler, logger, ctx) // logger from parent
+
+  return request.get(handler).handle()
+}
+```
+
+### Circular Dependency Detection
+
+Enabled by default. Throws a helpful error instead of stack overflow:
+
+```js
+const a = (c) => ({ b: c.get(b) })
+const b = (c) => ({ a: c.get(a) })
+
+container.get(a)
+// Error: Circular dependency detected: a -> b -> a
+```
+
+Disable for performance (not recommended):
+
+```js
+const container = createContainer({ detectCircular: false })
 ```
 
 ## Comparison
 
-| Approach                               | Decorator + Reflection | Explicit Factories    |
-| -------------------------------------- | ---------------------- | --------------------- |
-| Works in plain JS                      | ❌                     | ✅                    |
-| Works with TS 5.2+ standard decorators | ❌                     | ✅                    |
-| Requires experimental flags            | ✅                     | ❌                    |
-| Requires build step                    | ✅                     | ❌                    |
-| Type safety                            | ✅                     | ✅                    |
-| Debuggable                             | Hard                   | Easy (just functions) |
+| Feature                     | Decorator + Reflection    | This Library                   |
+| --------------------------- | ------------------------- | ------------------------------ |
+| Works in plain JS           | ❌                        | ✅                             |
+| TS 5.2+ standard decorators | ❌                        | ✅                             |
+| Experimental flags          | Required                  | None                           |
+| Build step                  | Required                  | None                           |
+| Type safety                 | ✅                        | ✅                             |
+| Async factories             | Complex                   | `await container.get(factory)` |
+| Stack traces                | Framework internals       | Your code                      |
+| Bundle size                 | 10-50KB+                  | ~100 lines (~1KB)              |
+| Auto-discovery              | ✅ (scan for @Injectable) | ❌ (explicit wiring)           |
+| Learning curve              | Decorators + DI concepts  | Just functions                 |
+
+## Trade-offs
+
+This library prioritizes simplicity and transparency. Here's when you might want something else:
+
+**Consider decorator-based DI if:**
+
+- You have 100+ services and want auto-discovery (scanning for `@Injectable`)
+- Your team is already fluent with NestJS/Angular patterns
+- You need runtime swapping of implementations without changing code
+
+**This library is great when:**
+
+- You want to understand exactly what's happening
+- You're building something new and don't want decorator lock-in
+- You need async factories without fighting the framework
+- You want to debug DI issues by reading stack traces
+- Bundle size matters
+
+The "explicit wiring" that decorator DI avoids is literally `inject(Class, dep1, dep2)` — the same information you'd put in a decorator, just in a different place.
+
+## TypeScript
+
+Full type inference with zero build step. The library ships with handwritten `.d.ts` files.
+
+```ts
+import { createContainer, inject, type Factory } from "no-decoration"
+
+class Logger {
+  log(msg: string) {
+    console.log(msg)
+  }
+}
+
+const logger: Factory<Logger> = () => new Logger()
+
+const container = createContainer()
+container.get(logger).log("typed!") // Full autocomplete
+```
+
+**In your IDE:**
+
+- Hover over factories to see inferred types
+- Cmd/Ctrl+Click to jump to definitions
+- Autocomplete for `container.get()` results
+- Type errors when passing wrong dependencies
+
+## API Reference
+
+### Types
+
+```ts
+type Factory<T> = (container: Container) => T
+
+interface Container {
+  get<T>(factory: Factory<T>): T
+  onDispose(fn: () => void | Promise<void>): void
+  dispose(): Promise<void>
+  has<T>(factory: Factory<T>): boolean
+}
+
+interface ContainerOptions {
+  detectCircular?: boolean // default: true
+}
+```
+
+### `createContainer(options?): Container`
+
+Creates a new dependency injection container.
+
+```ts
+const container = createContainer()
+
+// Disable circular dependency detection (not recommended)
+const container = createContainer({ detectCircular: false })
+```
+
+---
+
+### `childContainer(parent, options?): Container`
+
+Creates a child container that inherits resolved instances from the parent.
+
+Child containers have their own cache and disposal. Parent singletons are shared; child-specific factories are isolated.
+
+```ts
+const app = createContainer()
+
+function handleRequest(userId: string) {
+  const request = childContainer(app)
+  // ... use request container
+  await request.dispose() // Only disposes request-scoped resources
+}
+```
+
+---
+
+### `inject(Class, ...dependencies): Factory<T>`
+
+Helper to create a factory from a class and its dependencies. Pure convenience—these are equivalent:
+
+```ts
+const userService = inject(UserService, db, logger)
+const userService: Factory<UserService> = (c) =>
+  new UserService(c.get(db), c.get(logger))
+```
+
+---
+
+### `container.get(factory): T`
+
+Resolves a factory, returning the cached instance or creating a new one.
+
+- Results are cached (singleton behavior)
+- Async factories return promises—just `await` them
+- Throws on circular dependencies (if `detectCircular` is enabled)
+
+```ts
+const logger = container.get(loggerFactory) // Logger
+const db = await container.get(databaseFactory) // Promise<Database> → Database
+```
+
+---
+
+### `container.onDispose(fn): void`
+
+Registers a cleanup function to be called when `dispose()` is invoked.
+
+- Cleanup functions run in reverse order (LIFO)
+- Can be sync or async
+
+```ts
+const database: Factory<Promise<Database>> = async (c) => {
+  const db = await Database.connect(c.get(config).dbUrl)
+  c.onDispose(() => db.close())
+  return db
+}
+```
+
+---
+
+### `container.dispose(): Promise<void>`
+
+Calls all registered cleanup functions and clears the cache.
+
+- Runs disposers in reverse order (LIFO)
+- Aggregates errors into `AggregateError` if multiple disposers fail
+- Safe to call multiple times (cache is cleared)
+
+```ts
+await container.dispose()
+```
+
+---
+
+### `container.has(factory): boolean`
+
+Checks if a factory has been resolved (exists in cache or parent cache).
+
+```ts
+if (container.has(databaseFactory)) {
+  // Database was already initialized
+}
+```
 
 ## License
 

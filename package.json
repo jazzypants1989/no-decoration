@@ -10,6 +10,11 @@
     }
   },
   "scripts": {
+    "start": "node examples/basic.js && node examples/scoped.js && node examples/advanced.js && npx tsx examples/typescript.ts",
+    "example:basic": "node examples/basic.js",
+    "example:scoped": "node examples/scoped.js",
+    "example:advanced": "node examples/advanced.js",
+    "example:typescript": "npx tsx examples/typescript.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
