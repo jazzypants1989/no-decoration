@@ -49,7 +49,7 @@ lib/
 └── container.d.ts    # Type definitions (for IDE/TypeScript)
 ```
 
-This is the ["handwritten-dts" pattern](https://github.com/user/nobuild-ts-experiments) - full type safety with zero build step.
+This is the ["handwritten-dts" pattern](https://github.com/jazzypants1989/no-build-typescript) - full type safety with zero build step.
 
 **In your IDE:**
 

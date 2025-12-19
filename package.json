@@ -18,8 +18,16 @@
     "container",
     "no-decorators"
   ],
-  "author": "",
+  "author": "jazzypants1989",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jazzypants1989/no-decoration.git"
+  },
+  "homepage": "https://github.com/jazzypants1989/no-decoration#readme",
+  "bugs": {
+    "url": "https://github.com/jazzypants1989/no-decoration/issues"
+  },
   "devDependencies": {
     "@types/node": "^25.0.3"
   }
