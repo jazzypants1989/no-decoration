@@ -3,13 +3,13 @@
 // =============================================================================
 // This factory has no dependencies - it's a "root" of the dependency graph.
 
-/** @import { Factory } from 'no-decoration' */
+import { factory } from "no-decoration"
 
 export class Config {
   env = process.env.NODE_ENV || "development"
+  port = parseInt(process.env.PORT || "3000", 10)
   dbUrl = "postgres://localhost:5432/mydb"
   logLevel = "info"
 }
 
-/** @type {Factory<Config>} */
-export const config = () => new Config()
+export const config = factory("Config", () => new Config())

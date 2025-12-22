@@ -4,10 +4,9 @@
 // Depends on: config, logger
 // Demonstrates: async factory, disposal
 
-/** @import { Logger } from './logger.js' */
-
+import { factory } from "no-decoration"
 import { config } from "./config.js"
-import { logger } from "./logger.js"
+import { logger, Logger } from "./logger.js"
 
 export class Database {
   /**
@@ -44,12 +43,11 @@ export class Database {
   }
 }
 
-/** @type {import('no-decoration').Factory<Promise<Database>>} */
-export const database = async (c) => {
+export const database = factory("Database", async (c) => {
   const cfg = c.get(config)
   const log = c.get(logger)
 
   const db = await Database.connect(cfg.dbUrl, log)
   c.onDispose(() => db.close())
   return db
-}
+})

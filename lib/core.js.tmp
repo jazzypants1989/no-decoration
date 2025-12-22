@@ -1,0 +1,429 @@
+/** @import * as Types from './core.js' */
+/** @import * as Internal from './internal.js' */
+
+import {
+  CircularDependencyError,
+  FrozenContainerError,
+  TimeoutError,
+} from "./errors.js"
+
+/**
+ * @template T
+ * @param {Types.Factory<T>} factory
+ * @param {Types.Interceptor[]} interceptors
+ * @param {() => T} resolve
+ * @returns {T}
+ */
+function runWithInterceptors(factory, interceptors, resolve) {
+  let index = 0
+  /** @returns {T} */
+  const next = () => {
+    if (index < interceptors.length) {
+      return interceptors[index++](factory, next)
+    }
+    return resolve()
+  }
+  return next()
+}
+
+/** @type {Internal.createContainerInternal} */
+function createContainerInternal(parent, options = {}) {
+  const { detectCircular = true, interceptors = [] } = options
+
+  const cache = new Map()
+  const resolving = new Set()
+  const overrides = new Map()
+
+  /** @type {Array<() => void | Promise<void>>} */
+  const disposers = []
+  /** @type {Types.Factory<unknown>[]} */
+  const resolutionStack = []
+  /** @type {Types.ContainerInternals['hooks']} */
+  const hooks = {
+    beforeResolve: [],
+    afterResolve: [],
+    onDispose: [],
+    onOverride: [],
+  }
+
+  let frozen = false
+
+  /** @type {Types.Container} */
+  const container = {
+    get(factory) {
+      const actualFactory = overrides.get(factory) ?? factory
+
+      if (frozen && !cache.has(actualFactory) && !parent?.has(actualFactory)) {
+        throw new FrozenContainerError(actualFactory)
+      }
+
+      for (const hook of hooks.beforeResolve) {
+        hook(actualFactory)
+      }
+
+      if (actualFactory._transient && actualFactory._inner) {
+        resolutionStack.push(actualFactory)
+        try {
+          const start = performance.now()
+          const value = actualFactory._inner(container)
+          const ms = performance.now() - start
+          for (const hook of hooks.afterResolve) {
+            hook(actualFactory, value, ms)
+          }
+          return value
+        } finally {
+          resolutionStack.pop()
+        }
+      }
+
+      if (cache.has(actualFactory)) return cache.get(actualFactory)
+      if (parent?.has(actualFactory)) return parent.get(actualFactory)
+
+      if (detectCircular) {
+        if (resolving.has(actualFactory)) {
+          const chain = [...resolving, actualFactory]
+          throw new CircularDependencyError(chain)
+        }
+        resolving.add(actualFactory)
+      }
+
+      resolutionStack.push(actualFactory)
+      const start = performance.now()
+
+      const resolve = () => {
+        const value = actualFactory(container)
+
+        if (value instanceof Promise) {
+          const promise = value.then((resolved) => {
+            cache.set(actualFactory, resolved)
+            const ms = performance.now() - start
+            for (const hook of hooks.afterResolve) {
+              hook(actualFactory, resolved, ms)
+            }
+            return resolved
+          })
+          cache.set(actualFactory, promise)
+          return promise
+        }
+
+        cache.set(actualFactory, value)
+        const ms = performance.now() - start
+        for (const hook of hooks.afterResolve) {
+          hook(actualFactory, value, ms)
+        }
+        return value
+      }
+
+      try {
+        return interceptors.length > 0
+          ? runWithInterceptors(actualFactory, interceptors, resolve)
+          : resolve()
+      } finally {
+        resolutionStack.pop()
+        if (detectCircular) resolving.delete(actualFactory)
+      }
+    },
+
+    onDispose(fn) {
+      disposers.push(fn)
+    },
+
+    async dispose() {
+      const errors = []
+      for (const fn of disposers.reverse()) {
+        try {
+          await fn()
+        } catch (e) {
+          errors.push(e)
+        }
+      }
+      for (const f of cache.keys()) {
+        for (const hook of hooks.onDispose) {
+          hook(f)
+        }
+      }
+      disposers.length = 0
+      cache.clear()
+      if (errors.length) throw new AggregateError(errors, "Disposal failed")
+    },
+
+    has(f) {
+      const actualFactory = overrides.get(f) ?? f
+      return cache.has(actualFactory) || (parent?.has(actualFactory) ?? false)
+    },
+
+    getFactory(f) {
+      return () => f(container)
+    },
+
+    tryGet(f) {
+      try {
+        return container.get(f)
+      } catch {
+        return undefined
+      }
+    },
+
+    override(f, replacement) {
+      overrides.set(f, replacement)
+      for (const hook of hooks.onOverride) {
+        hook(f, replacement)
+      }
+    },
+
+    clearOverrides() {
+      overrides.clear()
+    },
+
+    clearCache() {
+      cache.clear()
+    },
+
+    freeze() {
+      frozen = true
+    },
+
+    asReadOnly() {
+      return {
+        get: (f) => container.get(f),
+        tryGet: (f) => container.tryGet(f),
+        has: (f) => container.has(f),
+        getFactory: (f) => container.getFactory(f),
+      }
+    },
+
+    with(plugin) {
+      const internals = { cache, overrides, hooks, resolutionStack }
+      const methods = plugin.apply(container, internals)
+      Object.assign(container, methods)
+      return /** @type {Types.Container & typeof methods} */ (container)
+    },
+  }
+
+  return container
+}
+
+/** @type {Types.createContainer} */
+export function createContainer(options) {
+  return createContainerInternal(undefined, options)
+}
+
+/** @type {Types.childContainer} */
+export function childContainer(parent, options) {
+  return createContainerInternal(parent, options)
+}
+
+/**
+ * @param {(new (...args: unknown[]) => unknown) | ((...args: unknown[]) => unknown)} ClassOrFn
+ * @param {Types.Factory<unknown>[]} deps
+ * @returns {Types.Factory<unknown>}
+ */
+export function inject(ClassOrFn, ...deps) {
+  const desc = Object.getOwnPropertyDescriptor(ClassOrFn, "prototype")
+  const isClass = desc && !desc.writable
+  return (c) => {
+    const args = deps.map((d) => c.get(d))
+    return isClass
+      ? Reflect.construct(ClassOrFn, args)
+      : Reflect.apply(ClassOrFn, undefined, args)
+  }
+}
+
+/**
+ * @template T
+ * @param {Types.Factory<T>} f
+ * @returns {Types.Factory<T>}
+ */
+export function transient(f) {
+  /** @type {Types.Factory<T>} */
+  const wrapper = (c) => f(c)
+  wrapper._transient = true
+  wrapper._inner = f
+  wrapper.displayName = f.displayName || f.name
+  return wrapper
+}
+
+/**
+ * @template T
+ * @param {Types.Container} container
+ * @param {Types.Factory<T>} f
+ * @returns {Types.Lazy<T>}
+ */
+export function lazy(container, f) {
+  /** @type {{ value: T } | null} */
+  let cached = null
+  return {
+    get value() {
+      if (cached === null) {
+        cached = { value: container.get(f) }
+      }
+      return cached.value
+    },
+  }
+}
+
+/**
+ * @template T
+ * @param {string} name
+ * @param {Types.Factory<T>} f
+ * @returns {Types.Factory<T>}
+ */
+export function named(name, f) {
+  /** @type {Types.Factory<T>} */
+  const wrapper = (c) => f(c)
+  wrapper.displayName = name
+  wrapper._inner = f
+  return wrapper
+}
+
+/**
+ * @param {string} name
+ * @param {(container: Types.Container) => unknown} fn
+ * @param {Types.FactoryOptions} [options]
+ * @returns {Types.Factory<unknown>}
+ */
+export function factory(name, fn, options = {}) {
+  /** @type {Types.Factory<unknown>} */
+  let result = fn
+  result.displayName = name
+
+  if (options.transient) {
+    result = transient(result)
+    result.displayName = name
+  }
+
+  if (options.timeout) {
+    result = timeout(result, options.timeout)
+    result.displayName = name
+  }
+
+  return result
+}
+
+/** @type {Types.createScope} */
+export function createScope(parent, options) {
+  const scope =
+    /** @type {Types.Container & { [Symbol.asyncDispose](): Promise<void> }} */ (
+      childContainer(parent, options)
+    )
+  scope[Symbol.asyncDispose] = () => scope.dispose()
+  return scope
+}
+
+/**
+ * @template T
+ * @param {Types.Factory<T | Promise<T>>} f
+ * @param {number} ms
+ * @returns {Types.Factory<Promise<T>>}
+ */
+export function timeout(f, ms) {
+  /** @type {Types.Factory<Promise<T>>} */
+  const wrapper = async (c) => {
+    const result = f(c)
+    if (!(result instanceof Promise)) return result
+
+    /** @type {Promise<never>} */
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new TimeoutError(f, ms))
+      }, ms)
+    })
+
+    return Promise.race([result, timeoutPromise])
+  }
+  wrapper.displayName = f.displayName || f.name
+  return wrapper
+}
+
+/**
+ * @template T
+ * @param {string} namespace
+ * @param {(tag: string) => Types.Factory<T>} factoryCreator
+ * @returns {(tag: string) => Types.Factory<T>}
+ */
+export function tagged(namespace, factoryCreator) {
+  /** @type {Map<string, Types.Factory<T>>} */
+  const cache = new Map()
+  return (tag) => {
+    if (!cache.has(tag)) {
+      const f = factoryCreator(tag)
+      f.displayName = `${namespace}:${tag}`
+      cache.set(tag, f)
+    }
+    const result = cache.get(tag)
+    if (!result) throw new Error(`No factory for tag: ${tag}`)
+    return result
+  }
+}
+
+/**
+ * @template T
+ * @param {Types.Factory<T>} f
+ * @param {(instance: T) => T} wrapper
+ * @returns {Types.Factory<T>}
+ */
+export function decorator(f, wrapper) {
+  /** @type {Types.Factory<T>} */
+  const decorated = (c) => wrapper(f(c))
+  decorated.displayName = f.displayName || f.name
+  decorated._inner = f
+  return decorated
+}
+
+/**
+ * @template {unknown[]} Args
+ * @template T
+ * @param {(...args: Args) => T} creator
+ * @returns {(...args: Args) => Types.Factory<T>}
+ */
+export function scoped(creator) {
+  return (/** @type {Args} */ ...args) => {
+    /** @type {Types.Factory<T>} */
+    const f = () => creator(...args)
+    f.displayName = creator.name || "scoped"
+    return f
+  }
+}
+
+/**
+ * @template {unknown[]} Args
+ * @template T
+ * @param {(container: Types.Container, ...args: Args) => T} creator
+ * @returns {(...args: Args) => Types.Factory<T>}
+ */
+export function scopedWith(creator) {
+  return (/** @type {Args} */ ...args) => {
+    /** @type {Types.Factory<T>} */
+    const f = (c) => creator(c, ...args)
+    f.displayName = creator.name || "scopedWith"
+    return f
+  }
+}
+
+/**
+ * @param {Types.Plugin<object>[]} plugins
+ * @returns {Types.Plugin<object>}
+ */
+export function pipe(...plugins) {
+  /**
+   * @param {Types.Container} container
+   * @param {Types.ContainerInternals} internals
+   */
+  function apply(container, internals) {
+    let methods = {}
+    for (const plugin of plugins) {
+      Object.assign(methods, plugin.apply(container, internals))
+    }
+    return methods
+  }
+
+  return {
+    name: plugins.map((p) => p.name).join("+"),
+    apply,
+  }
+}
+
+/** @type {Types.definePlugin} */
+export function definePlugin(name, apply) {
+  return { name, apply }
+}

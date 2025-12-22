@@ -3,10 +3,8 @@
 // =============================================================================
 // Depends on: config
 
-/** @import { Factory } from 'no-decoration' */
-/** @import { Config } from './config.js' */
-
-import { config } from "./config.js"
+import { factory } from "no-decoration"
+import { config, Config } from "./config.js"
 
 export class Logger {
   /** @param {Config} config */
@@ -27,5 +25,4 @@ export class Logger {
   }
 }
 
-/** @type {Factory<Logger>} */
-export const logger = (c) => new Logger(c.get(config))
+export const logger = factory("Logger", (c) => new Logger(c.get(config)))

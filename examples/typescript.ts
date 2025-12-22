@@ -11,6 +11,7 @@
 //   4. Async factories for database connections, etc.
 //   5. Disposal/cleanup for resource management
 //   6. Circular dependency detection
+//   7. Patterns plugin: guard, validate, intercept, transform, catchError
 //
 // 💡 IDE Tips - Notice how types flow through without annotations:
 //    • Hover over factories → inferred types
@@ -26,6 +27,48 @@ import {
   type Factory,
   type Container,
 } from "no-decoration"
+
+// =============================================================================
+// DEMONSTRATE TYPE INFERENCE FOR inject()
+// =============================================================================
+// These examples show that the improved .d.ts signature for inject provides
+// full type inference for both dependencies and result types.
+
+// Function target
+function add(a: number, b: number): number {
+  return a + b
+}
+const depA: Factory<number> = () => 2
+const depB: Factory<number> = () => 3
+
+const addFactory = inject(add, depA, depB)
+//    ^? Factory<number> (inferred)
+// Hover over addFactory above to see: (container: Container) => number
+
+// Usage example:
+const addContainer = createContainer()
+const sum = addContainer.get(addFactory)
+console.log("addFactory result:", sum) // 5
+
+// Class target
+class Pair {
+  constructor(public a: number, public b: string) {}
+}
+const depNum: Factory<number> = () => 42
+const depStr: Factory<string> = () => "hello"
+const pairFactory = inject(Pair, depNum, depStr) // OK
+//    ^? Factory<Pair> (inferred)
+// Hover over pairFactory above to see: (container: Container) => Pair
+
+// Usage example:
+const pairContainer = createContainer()
+const pair = pairContainer.get(pairFactory)
+console.log("pairFactory result:", pair) // Pair { a: 42, b: "hello" }
+
+// If you try to pass the wrong type, TypeScript will error:
+// const badFactory = inject(Pair, depNum, depNum) // Error: number is not assignable to string
+// Wrong types? TypeScript will error (with a long message):
+// const badFactory = inject(Pair, depNum, depNum) // Error
 
 // =============================================================================
 // 1. BASIC DEPENDENCY INJECTION
@@ -206,6 +249,93 @@ const server: Factory<Server> = (c) => {
 // const container = createContainer({ detectCircular: false })
 
 // =============================================================================
+// 7. PATTERNS PLUGIN (Type-Safe Decorators)
+// =============================================================================
+// The patterns plugin provides NestJS-like decorators with full type safety.
+
+import {
+  pipe,
+  guard,
+  validate,
+  intercept,
+  catchError,
+  transform,
+  type InterceptContext,
+} from "no-decoration/patterns"
+import { factory } from "no-decoration"
+
+// Guard: Access control before resolution
+const requireEnv = (envVar: string) => () => {
+  if (!process.env[envVar]) {
+    throw new Error(`Missing required env var: ${envVar}`)
+  }
+}
+
+// Validate: Transform/validate after resolution
+interface ApiConfig {
+  apiKey: string
+  baseUrl: string
+}
+
+const validateApiConfig = (cfg: ApiConfig): ApiConfig => {
+  if (!cfg.apiKey) throw new Error("Missing apiKey")
+  if (!cfg.baseUrl.startsWith("http")) throw new Error("Invalid baseUrl")
+  return cfg
+}
+
+// Intercept: Wrap resolution (timing, logging, etc.)
+const timing = <T>(next: () => T, ctx: InterceptContext<T>): T => {
+  const start = Date.now()
+  const result = next()
+  console.log(`  [timing] ${ctx.factory.displayName} resolved in ${Date.now() - start}ms`)
+  return result
+}
+
+// catchError: Handle resolution errors with fallback
+const withFallback = <T>(fallback: T) => (error: unknown): T => {
+  console.log(`  [fallback] Using fallback due to: ${error}`)
+  return fallback
+}
+
+// Compose decorators with pipe() - types flow through each step
+const apiConfig = pipe(
+  factory("ApiConfig", (): ApiConfig => ({
+    apiKey: process.env.API_KEY || "demo-key",
+    baseUrl: "https://api.example.com",
+  })),
+  validate(validateApiConfig), // Type: Factory<ApiConfig>
+  intercept(timing),           // Type: Factory<ApiConfig>
+)
+
+// Transform changes the type - TypeScript tracks this!
+interface User {
+  id: number
+  name: string
+  email: string
+}
+
+const usersFactory = factory("Users", (): User[] => [
+  { id: 1, name: "Alice", email: "alice@example.com" },
+  { id: 2, name: "Bob", email: "bob@example.com" },
+])
+
+// Transform User[] to string[] - the type changes!
+const userEmails = pipe(
+  usersFactory,
+  transform((users) => users.map((u) => u.email))
+)
+// userEmails is now Factory<string[]> - hover to verify!
+
+// Error handling with type-safe fallback
+const riskyFactory = pipe(
+  factory("Risky", (): number => {
+    if (Math.random() > 0.5) throw new Error("Random failure")
+    return 42
+  }),
+  catchError(withFallback(-1)) // Fallback must return number
+)
+
+// =============================================================================
 // PUTTING IT ALL TOGETHER
 // =============================================================================
 
@@ -240,6 +370,21 @@ async function main() {
   handleRequest(app, "alice")
   handleRequest(app, "bob")
   // Notice: "Logger created" only printed once (shared singleton)
+
+  // Patterns plugin demo
+  console.log("\n=== Patterns Plugin ===")
+
+  // Validated config with timing
+  const cfg = app.get(apiConfig)
+  console.log("API Config:", cfg)
+
+  // Transform: User[] -> string[]
+  const emails: string[] = app.get(userEmails) // Type is string[]!
+  console.log("User emails:", emails)
+
+  // Error handling with fallback
+  const value = app.get(riskyFactory)
+  console.log("Risky value (or fallback):", value)
 
   // Cleanup everything
   console.log("\n=== Disposal ===")

@@ -5,17 +5,61 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./lib/container.d.ts",
-      "import": "./lib/container.js"
+      "types": "./lib/core.d.ts",
+      "import": "./lib/core.js"
+    },
+    "./plugins": {
+      "types": "./lib/plugins/index.d.ts",
+      "import": "./lib/plugins/index.js"
+    },
+    "./plugins/health": {
+      "types": "./lib/plugins/health.d.ts",
+      "import": "./lib/plugins/health.js"
+    },
+    "./plugins/observability": {
+      "types": "./lib/plugins/observability.d.ts",
+      "import": "./lib/plugins/observability.js"
+    },
+    "./plugins/testing": {
+      "types": "./lib/plugins/testing.d.ts",
+      "import": "./lib/plugins/testing.js"
+    },
+    "./plugins/debug": {
+      "types": "./lib/plugins/debug.d.ts",
+      "import": "./lib/plugins/debug.js"
+    },
+    "./plugins/discover": {
+      "types": "./lib/plugins/discover.d.ts",
+      "import": "./lib/plugins/discover.js"
+    },
+    "./plugins/batch": {
+      "types": "./lib/plugins/batch.d.ts",
+      "import": "./lib/plugins/batch.js"
+    },
+    "./patterns": {
+      "types": "./lib/plugins/patterns.d.ts",
+      "import": "./lib/plugins/patterns.js"
+    },
+    "./presets": {
+      "types": "./lib/presets.d.ts",
+      "import": "./lib/presets.js"
+    },
+    "./errors": {
+      "types": "./lib/errors.d.ts",
+      "import": "./lib/errors.js"
     }
   },
   "scripts": {
-    "start": "node examples/basic.js && node examples/scoped.js && node examples/advanced.js && npx tsx examples/typescript.ts",
+    "start": "node examples/basic.js",
+    "example:why-di": "node examples/why-di.js",
     "example:basic": "node examples/basic.js",
-    "example:scoped": "node examples/scoped.js",
-    "example:advanced": "node examples/advanced.js",
+    "example:testing": "node examples/testing.js",
+    "example:plugins": "node examples/plugins.js",
     "example:typescript": "npx tsx examples/typescript.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "example:server": "node examples/multifile/index.js",
+    "example:patterns": "node examples/patterns.js",
+    "test": "node --test tests/*.test.js tests/plugins/*.test.js",
+    "test:watch": "node --test --watch tests/*.test.js tests/plugins/*.test.js"
   },
   "keywords": [
     "dependency-injection",

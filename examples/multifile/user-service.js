@@ -4,11 +4,9 @@
 // Depends on: database, logger
 // Demonstrates: async factory with async dependencies
 
-/** @import { Database } from './database.js' */
-/** @import { Logger } from './logger.js' */
-
-import { database } from "./database.js"
-import { logger } from "./logger.js"
+import { factory } from "no-decoration"
+import { database, Database } from "./database.js"
+import { logger, Logger } from "./logger.js"
 
 export class UserService {
   /**
@@ -32,10 +30,8 @@ export class UserService {
   }
 }
 
-// The JSDoc @import isn't playing nice with async/await for some reason...
-/** @type {import('no-decoration').Factory<Promise<UserService>>} */
-export const userService = async (c) => {
+export const userService = factory("UserService", async (c) => {
   const db = await c.get(database) // database is async
   const log = c.get(logger) // logger is sync
   return new UserService(db, log)
-}
+})

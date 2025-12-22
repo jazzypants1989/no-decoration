@@ -10,6 +10,6 @@
     "allowJs": true,
     "noEmit": true
   },
-  "include": ["examples/**/*"],
+  "include": ["lib/**/*", "examples/**/*", "experiments/**/*"],
   "exclude": ["node_modules"]
 }
